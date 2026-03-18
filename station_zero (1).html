@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>STATION ZERO</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+canvas { display:block; width:100vw; height:100vh; }
+
+#ui { position:fixed; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:10; }
+
+#crosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:18px; height:18px; }
+#crosshair::before, #crosshair::after { content:''; position:absolute; background:rgba(0,220,255,0.7); }
+#crosshair::before { width:2px; height:10px; top:4px; left:8px; }
+#crosshair::after  { width:10px; height:2px; top:8px; left:4px; }
+
+#hud-top {
+  position:absolute; top:0; left:0; right:0;
+  display:flex; justify-content:space-between; align-items:flex-start;
+  padding:16px 20px;
+}
+
+#station-name {
+  font-family:'Courier New',monospace; font-size:11px; letter-spacing:4px;
+  color:rgba(0,200,255,0.5);
+}
+#ai-status {
+  font-size:11px; letter-spacing:2px; color:rgba(255,60,60,0.8);
+  text-align:right;
+}
+#ai-status span { font-size:16px; color:#ff2222; }
+
+/* Objective tracker */
+#objectives {
+  position:absolute; top:60px; right:20px;
+  font-size:10px; letter-spacing:2px; line-height:2;
+  color:rgba(0,200,255,0.4); text-align:right;
+}
+.obj-done { color:rgba(0,255,100,0.5); text-decoration:line-through; }
+.obj-active { color:rgba(0,220,255,0.9); }
+
+/* Stats */
+#stats {
+  position:absolute; bottom:28px; left:50%; transform:translateX(-50%);
+  display:flex; gap:24px; align-items:flex-end;
+}
+.stat-block { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.stat-label { font-size:9px; color:rgba(0,200,255,0.35); letter-spacing:3px; }
+.stat-bar-wrap { width:90px; height:4px; background:rgba(0,0,0,0.6); border:1px solid rgba(0,200,255,0.15); }
+.stat-bar { height:100%; transition:width 0.3s ease; }
+#hp-fill   { background:linear-gradient(90deg,#880000,#ff2222); }
+#oxy-fill  { background:linear-gradient(90deg,#004488,#00aaff); }
+#pwr-fill  { background:linear-gradient(90deg,#006600,#00ff88); }
+
+/* Interact prompt */
+#interact-prompt {
+  position:absolute; top:56%; left:50%; transform:translateX(-50%);
+  font-size:11px; color:rgba(0,220,255,0.9); letter-spacing:3px;
+  background:rgba(0,0,0,0.6); padding:5px 14px;
+  border:1px solid rgba(0,200,255,0.2); opacity:0; transition:opacity 0.2s;
+}
+
+/* Message */
+#message {
+  position:absolute; top:42%; left:50%; transform:translateX(-50%);
+  font-size:13px; color:rgba(0,220,255,0.95); letter-spacing:3px;
+  text-align:center; text-shadow:0 0 20px rgba(0,200,255,0.6);
+  opacity:0; transition:opacity 0.5s; white-space:nowrap;
+}
+
+/* Controls */
+#controls {
+  position:absolute; bottom:28px; right:20px;
+  font-size:9px; color:rgba(0,200,255,0.2); line-height:1.9; letter-spacing:1px; text-align:right;
+}
+
+/* Hotbar */
+#hotbar {
+  position:absolute; bottom:72px; left:50%; transform:translateX(-50%);
+  display:flex; gap:5px;
+}
+.slot {
+  width:44px; height:44px; border:1px solid rgba(0,200,255,0.15);
+  background:rgba(0,10,20,0.7); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; font-size:9px;
+  color:rgba(0,200,255,0.3); position:relative;
+}
+.slot.active { border-color:rgba(0,220,255,0.7); background:rgba(0,200,255,0.07); }
+.slot-icon { font-size:18px; line-height:1; }
+.slot-count { position:absolute; bottom:2px; right:3px; font-size:8px; color:rgba(0,200,255,0.5); }
+
+/* Lock hint */
+#lock-hint {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-size:11px; color:rgba(0,220,255,0.8); letter-spacing:2px;
+  background:rgba(0,5,15,0.85); padding:12px 24px;
+  border:1px solid rgba(0,200,255,0.2); display:none;
+  text-align:center; line-height:1.8;
+}
+
+/* Damage / oxygen flash */
+#damage-flash {
+  position:fixed; top:0;left:0;right:0;bottom:0;
+  background:rgba(255,0,0,0); pointer-events:none; z-index:9; transition:background 0.1s;
+}
+#oxy-flash {
+  position:fixed; top:0;left:0;right:0;bottom:0;
+  background:rgba(0,50,150,0); pointer-events:none; z-index:8;
+}
+#scan-line {
+  position:fixed; top:0;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,0.08) 0px,transparent 1px,transparent 3px);
+  pointer-events:none; z-index:6;
+}
+#vignette {
+  position:fixed; top:0;left:0;right:0;bottom:0;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,0.75) 100%);
+  pointer-events:none; z-index:5;
+}
+
+/* Overlay */
+#overlay {
+  position:fixed; top:0;left:0;right:0;bottom:0;
+  background:#000; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; z-index:100; pointer-events:all; gap:16px;
+}
+#overlay h1 {
+  font-size:56px; color:#00ccff; letter-spacing:14px; font-weight:400;
+  text-shadow:0 0 40px rgba(0,200,255,0.5);
+}
+.overlay-sub { font-size:11px; color:rgba(0,200,255,0.35); letter-spacing:4px; }
+.overlay-story {
+  font-size:12px; color:rgba(200,220,255,0.5); letter-spacing:2px;
+  max-width:480px; text-align:center; line-height:2;
+}
+#start-btn {
+  margin-top:12px; padding:11px 36px; background:transparent;
+  border:1px solid rgba(0,200,255,0.4); color:#00ccff;
+  font-family:'Courier New',monospace; font-size:12px;
+  letter-spacing:4px; cursor:pointer; transition:all 0.2s;
+}
+#start-btn:hover { background:rgba(0,200,255,0.08); border-color:#00ccff; }
+
+/* Game over */
+#gameover {
+  display:none; position:fixed; top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.95); flex-direction:column;
+  align-items:center; justify-content:center; z-index:100; pointer-events:all; gap:14px;
+}
+#gameover h1 { font-size:44px; letter-spacing:8px; }
+#gameover p { color:rgba(255,255,255,0.35); letter-spacing:2px; font-size:12px; }
+#restart-btn {
+  padding:10px 30px; background:transparent; font-family:'Courier New',monospace;
+  font-size:11px; letter-spacing:4px; cursor:pointer;
+}
+
+/* Win screen */
+#winscreen {
+  display:none; position:fixed; top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.95); flex-direction:column;
+  align-items:center; justify-content:center; z-index:100; pointer-events:all; gap:14px;
+}
+#winscreen h1 { font-size:44px; color:#00ffaa; letter-spacing:8px; font-weight:400; }
+#winscreen p { color:rgba(0,255,170,0.4); letter-spacing:2px; font-size:12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="scan-line"></div>
+<div id="vignette"></div>
+<div id="damage-flash"></div>
+<div id="oxy-flash"></div>
+
+<div id="ui">
+  <div id="crosshair"></div>
+
+  <div id="hud-top">
+    <div>
+      <div id="station-name">STATION ZERO — DECK 7</div>
+      <div style="font-size:9px;color:rgba(0,200,255,0.25);letter-spacing:2px;margin-top:3px;" id="location-label">SECTOR: UNKNOWN</div>
+    </div>
+    <div id="ai-status">
+      AI LOCKDOWN <span id="lockdown-timer">8:00</span>
+    </div>
+  </div>
+
+  <div id="objectives">
+    <div id="obj-power" class="obj-active">◈ RESTORE POWER</div>
+    <div id="obj-door" class="obj-active" style="color:rgba(0,200,255,0.25)">◈ UNLOCK ESCAPE POD BAY</div>
+    <div id="obj-escape" class="obj-active" style="color:rgba(0,200,255,0.25)">◈ REACH ESCAPE POD</div>
+  </div>
+
+  <div id="interact-prompt"></div>
+  <div id="message"></div>
+
+  <div id="hotbar">
+    <div class="slot active" id="slot-0"><div class="slot-icon">🔋</div><div class="slot-count" id="cnt-0">0</div></div>
+    <div class="slot" id="slot-1"><div class="slot-icon">💊</div><div class="slot-count" id="cnt-1">0</div></div>
+    <div class="slot" id="slot-2"><div class="slot-icon">🔑</div><div class="slot-count" id="cnt-2">0</div></div>
+    <div class="slot" id="slot-3"><div class="slot-icon">🔧</div><div class="slot-count" id="cnt-3">0</div></div>
+    <div class="slot" id="slot-4"><div class="slot-icon">🔫</div><div class="slot-count" id="cnt-4">0</div></div>
+  </div>
+
+  <div id="stats">
+    <div class="stat-block">
+      <div class="stat-bar-wrap"><div class="stat-bar" id="hp-fill" style="width:100%"></div></div>
+      <div class="stat-label">HULL / HP</div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-bar-wrap"><div class="stat-bar" id="oxy-fill" style="width:100%"></div></div>
+      <div class="stat-label">OXYGEN</div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-bar-wrap"><div class="stat-bar" id="pwr-fill" style="width:0%"></div></div>
+      <div class="stat-label">POWER</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    WASD / ARROWS · MOVE<br>
+    MOUSE · LOOK<br>
+    SPACE · JUMP<br>
+    E · INTERACT<br>
+    F · USE ITEM<br>
+    ESC+CLICK · RELOCK
+  </div>
+
+  <div id="lock-hint">CLICK TO LOCK MOUSE</div>
+</div>
+
+<div id="overlay">
+  <div class="overlay-sub">// EMERGENCY BROADCAST //</div>
+  <h1>STATION ZERO</h1>
+  <div class="overlay-story">
+    Station Zero. Orbit decaying. Crew: missing.<br>
+    The AI — MIRA — has sealed all exits.<br>
+    You have 8 minutes before full lockdown.<br>
+    Restore power. Find the keycard. Reach the pod.
+  </div>
+  <div class="overlay-sub" style="color:rgba(255,60,60,0.5);">WARNING: HOSTILE UNITS DETECTED ON ALL DECKS</div>
+  <button id="start-btn" onclick="startGame()">INITIALIZE</button>
+</div>
+
+<div id="gameover">
+  <h1 id="death-head" style="color:#ff2222;">TERMINATED</h1>
+  <p id="death-reason">MIRA has sealed your sector.</p>
+  <p id="survived-time"></p>
+  <button id="restart-btn" style="border:1px solid rgba(255,50,50,0.4);color:#ff4444;" onclick="location.reload()">RESTART SEQUENCE</button>
+</div>
+
+<div id="winscreen">
+  <h1>ESCAPED</h1>
+  <p>You launched the pod with <span id="time-left-win"></span> to spare.</p>
+  <p style="margin-top:8px;">MIRA will not forget.</p>
+  <button style="margin-top:16px;padding:10px 30px;background:transparent;border:1px solid rgba(0,255,170,0.4);color:#00ffaa;font-family:'Courier New',monospace;font-size:11px;letter-spacing:4px;cursor:pointer;" onclick="location.reload()">PLAY AGAIN</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+let scene, camera, renderer, clock;
+let gameActive = false;
+let isPointerLocked = false;
+let keys = {};
+let yaw = 0, pitch = 0;
+let velocityY = 0, onGround = true;
+let damageFlashTimer = 0, oxyFlashTimer = 0;
+let msgTimer = 0;
+let selectedSlot = 0;
+
+let player = { hp:100, oxygen:100, power:0 };
+let inv = { battery:0, medkit:0, keycard:0, toolkit:0, gun:0 };
+
+let lockdownTime = 480; // 8 minutes in seconds
+let gameTime = 0;
+
+// Objectives
+let obj = { power:false, door:false, escaped:false };
+
+// World objects
+let robots = [];
+let collectibles = [];
+let interactables = []; // doors, consoles, pod
+let walls = []; // collision boxes
+let robotSpawnTimer = 30;
+
+let sunLight, ambientLight, pointLights = [];
+
+// ── INIT ──────────────────────────────────────────────────────────────────
+function init() {
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000814, 0.008);
+  scene.background = new THREE.Color(0x000510);
+
+  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 200);
+  camera.position.set(0, 1.7, 0);
+
+  renderer = new THREE.WebGLRenderer({ canvas:document.getElementById('c'), antialias:true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.8;
+
+  clock = new THREE.Clock();
+
+  buildStation();
+  buildLighting();
+  spawnCollectibles();
+  buildInteractables();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+    if (!gameActive) return;
+    if (e.code === 'KeyE') interact();
+    if (e.code === 'KeyF') useItem();
+    if (['Digit1','Digit2','Digit3','Digit4','Digit5'].includes(e.code))
+      selectSlot(parseInt(e.code.replace('Digit',''))-1);
+  });
+  document.addEventListener('keyup', e => keys[e.code] = false);
+
+  document.addEventListener('mousemove', e => {
+    if (!isPointerLocked || !gameActive) return;
+    yaw   -= e.movementX * 0.003;
+    pitch -= e.movementY * 0.003;
+    pitch = Math.max(-1.2, Math.min(0.8, pitch));
+  });
+
+  document.getElementById('c').addEventListener('click', () => {
+    if (gameActive && !isPointerLocked) document.getElementById('c').requestPointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    isPointerLocked = !!document.pointerLockElement;
+    const h = document.getElementById('lock-hint');
+    if (!h) return;
+    h.style.display = isPointerLocked ? 'none' : (gameActive ? 'block' : 'none');
+  });
+
+  document.addEventListener('pointerlockerror', () => {
+    const h = document.getElementById('lock-hint');
+    if (h) { h.textContent = '⚠ POINTER LOCK BLOCKED — open file directly in browser'; h.style.display = 'block'; }
+  });
+}
+
+// ── STATION GEOMETRY ──────────────────────────────────────────────────────
+function buildStation() {
+  const metalDark  = new THREE.MeshLambertMaterial({ color:0x0a0f18 });
+  const metalMid   = new THREE.MeshLambertMaterial({ color:0x111820 });
+  const metalLight = new THREE.MeshLambertMaterial({ color:0x1a2535 });
+  const grate      = new THREE.MeshLambertMaterial({ color:0x0d1520 });
+  const hull       = new THREE.MeshLambertMaterial({ color:0x060c14 });
+  const redPanel   = new THREE.MeshLambertMaterial({ color:0x2a0000 });
+  const glassBlue  = new THREE.MeshLambertMaterial({ color:0x001030, transparent:true, opacity:0.5 });
+
+  // ── ROOM 1: Starting corridor (power room) ──
+  makeRoom(0, 0, 0, 14, 4, 10, metalDark, hull);
+
+  // Floor grating details
+  for (let x=-6; x<=6; x+=2) {
+    for (let z=-4; z<=4; z+=2) {
+      const g = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.05, 1.9), grate);
+      g.position.set(x, 0.03, z); scene.add(g);
+    }
+  }
+
+  // Wall panels room 1
+  addWallPanels(0, 0, -4.8, 14, 4, metalMid, true);
+  addWallPanels(0, 0,  4.8, 14, 4, redPanel, true);
+
+  // Corridor going east
+  makeRoom(20, 0, 0, 12, 4, 8, metalDark, hull);
+  // Connection tunnel
+  makeRoom(13, 0, 0, 6, 3.5, 5, metalMid, hull);
+
+  // ── ROOM 2: Central hub ──
+  makeRoom(36, 0, 0, 18, 4.5, 18, metalLight, hull);
+  // Hub floor
+  for (let x=-8; x<=8; x+=2) {
+    for (let z=-8; z<=8; z+=2) {
+      const g = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.06, 1.9), grate);
+      g.position.set(36+x, 0.04, z); scene.add(g);
+    }
+  }
+  // ── COLLISION WALLS — only outer perimeter, openings left where corridors connect ──
+  // Room 1 outer walls (z sides)
+  walls.push({ min:new THREE.Vector3(-8,-1,-5.3), max:new THREE.Vector3(8,6,-4.7) });   // back wall
+  walls.push({ min:new THREE.Vector3(-8,-1, 4.7), max:new THREE.Vector3(8,6, 5.3) });   // front wall
+  // Room 1 left wall (west)
+  walls.push({ min:new THREE.Vector3(-8,-1,-5), max:new THREE.Vector3(-6.7,6,5) });
+  // Room 1 right wall — gap at z=0±2 for tunnel passage
+  walls.push({ min:new THREE.Vector3(6.7,-1,-5), max:new THREE.Vector3(8,6,-2.5) });
+  walls.push({ min:new THREE.Vector3(6.7,-1, 2.5), max:new THREE.Vector3(8,6, 5) });
+
+  // Room 2 (hub) outer walls — gaps on west side (from tunnel) and north (corridor to pod)
+  walls.push({ min:new THREE.Vector3(26.7,-1,-9), max:new THREE.Vector3(28,6, 9) });    // west — gap at z=0±2
+  walls.push({ min:new THREE.Vector3(26.7,-1,-9), max:new THREE.Vector3(45,-1,-8.7) }); // just floor markers
+  walls.push({ min:new THREE.Vector3(44.7,-1,-9), max:new THREE.Vector3(45.3,6, 9) });  // east wall
+  walls.push({ min:new THREE.Vector3(28,-1, 8.7), max:new THREE.Vector3(45,6, 9.3) });  // south wall
+  walls.push({ min:new THREE.Vector3(28,-1,-9.3), max:new THREE.Vector3(45,6,-8.7) });  // north wall (gap at x=36±2)
+  walls.push({ min:new THREE.Vector3(28,-1,-9.3), max:new THREE.Vector3(33,6,-8.7) });
+  walls.push({ min:new THREE.Vector3(39,-1,-9.3), max:new THREE.Vector3(45,6,-8.7) });
+
+  // Corridor room1→hub: west gap already open, east opens into hub west wall gap
+  walls.push({ min:new THREE.Vector3(9,-1,-2.8), max:new THREE.Vector3(10,6,-2.2) });   // tunnel south
+  walls.push({ min:new THREE.Vector3(9,-1, 2.2), max:new THREE.Vector3(10,6, 2.8) });   // tunnel north
+
+  // Hub→pod corridor (x=36, z=-9 to -22)
+  walls.push({ min:new THREE.Vector3(31.7,-1,-22), max:new THREE.Vector3(32.3,6,-9) });  // west side
+  walls.push({ min:new THREE.Vector3(39.7,-1,-22), max:new THREE.Vector3(40.3,6,-9) });  // east side
+
+  // Pod bay outer walls — gap on south for corridor
+  walls.push({ min:new THREE.Vector3(27.7,-1,-37), max:new THREE.Vector3(28.3,6,-22) }); // west
+  walls.push({ min:new THREE.Vector3(43.7,-1,-37), max:new THREE.Vector3(44.3,6,-22) }); // east
+  walls.push({ min:new THREE.Vector3(28,-1,-37.3), max:new THREE.Vector3(44,6,-36.7) }); // far north wall
+
+  // Central pillar (hub)
+  walls.push({ min:new THREE.Vector3(34.5,-1,-1.5), max:new THREE.Vector3(37.5,5,1.5) });
+
+  // South passage (room1 south)
+  walls.push({ min:new THREE.Vector3(-4.3,-1,-20), max:new THREE.Vector3(-3.7,6,-4.7) });
+  walls.push({ min:new THREE.Vector3( 3.7,-1,-20), max:new THREE.Vector3( 4.3,6,-4.7) });
+  walls.push({ min:new THREE.Vector3(-4,-1,-20.3), max:new THREE.Vector3( 4,6,-19.7) });
+
+  // Corridor north from hub
+  makeRoom(36, 0, -16, 8, 4, 12, metalDark, hull);
+
+  // ── ROOM 3: Pod bay (north end) ──
+  makeRoom(36, 0, -30, 16, 5, 14, metalMid, hull);
+  // Pod bay floor
+  for (let x=-7; x<=7; x+=2) {
+    for (let z=-6; z<=6; z+=2) {
+      const g = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.06, 1.9), grate);
+      g.position.set(36+x, 0.04, -30+z); scene.add(g);
+    }
+  }
+
+  // Escape pod visual
+  buildEscapePod(36, 0, -34);
+
+  // Corridor south (power room south side)
+  makeRoom(0, 0, -16, 8, 4, 8, metalDark, hull);
+
+  // ── Pipes and details ──
+  for (let x=-5; x<=5; x+=3.5) {
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 14, 6), new THREE.MeshLambertMaterial({color:0x223355}));
+    pipe.rotation.z = Math.PI/2; pipe.position.set(x, 3.6, -4); scene.add(pipe);
+  }
+  // Vertical pipes hub
+  [34, 38].forEach(x => {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 4.5, 6), new THREE.MeshLambertMaterial({color:0x334466}));
+    p.position.set(x, 2.25, 8); scene.add(p);
+  });
+
+  // Central pillar visual
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 4.5, 8), metalMid);
+  pillar.position.set(36, 2.25, 0); pillar.castShadow = true; scene.add(pillar);
+
+  // Crates / cover (visual + small collision)
+  [[8,0.4,2],[8,0.4,-2],[28,0.4,5],[-5,0.4,-14],[36,0.4,-22],[30,0.4,-28],[42,0.4,-28]].forEach(([x,y,z]) => {
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.8,1.2), new THREE.MeshLambertMaterial({color:0x1a2a1a}));
+    crate.position.set(x,y,z); crate.castShadow=true; scene.add(crate);
+    walls.push({ min:new THREE.Vector3(x-0.7,-1,z-0.7), max:new THREE.Vector3(x+0.7,2,z+0.7) });
+  });
+
+  // Windows (broken hull view to space)
+  [[0,2.5,-4.9],[36,3,-8.9],[36,3,8.9]].forEach(([x,y,z]) => {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(2,1.2,0.1), glassBlue);
+    win.position.set(x,y,z); scene.add(win);
+    // Stars beyond
+    const stars = new THREE.Mesh(new THREE.PlaneGeometry(2,1.2), new THREE.MeshBasicMaterial({color:0x000510}));
+    stars.position.set(x,y,z+(z<0?-0.15:0.15)); scene.add(stars);
+  });
+
+  // Warning stripes on walls
+  addStripes(36, 1, -22.4, 16);
+}
+
+function makeRoom(cx, cy, cz, w, h, d, floorMat, wallMat) {
+  // Floor
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), floorMat);
+  floor.position.set(cx, cy-0.1, cz); floor.receiveShadow=true; scene.add(floor);
+  // Ceiling
+  const ceil = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), wallMat);
+  ceil.position.set(cx, cy+h, cz); scene.add(ceil);
+  // Visual walls only — NO collision added here
+  const wallGeo = new THREE.BoxGeometry(w, h, 0.2);
+  const sideGeo = new THREE.BoxGeometry(0.2, h, d);
+  [cz-d/2, cz+d/2].forEach(zp => {
+    const wm = new THREE.Mesh(wallGeo, wallMat);
+    wm.position.set(cx, cy+h/2, zp); wm.castShadow=true; scene.add(wm);
+  });
+  [cx-w/2, cx+w/2].forEach(xp => {
+    const wm = new THREE.Mesh(sideGeo, wallMat);
+    wm.position.set(xp, cy+h/2, cz); wm.castShadow=true; scene.add(wm);
+  });
+}
+
+function addWallPanels(cx, cy, cz, w, h, mat, horiz) {
+  for (let i=-w/2+1; i<w/2; i+=2.5) {
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(2, h*0.6, 0.08), mat);
+    panel.position.set(horiz ? cx+i : cx, cy+h/2, horiz ? cz : cz+i);
+    scene.add(panel);
+  }
+}
+
+function addStripes(cx, cy, cz, w) {
+  for (let i=0; i<w; i+=1.5) {
+    if (i%3===0) {
+      const s = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.15, 0.05), new THREE.MeshBasicMaterial({color:0xffaa00}));
+      s.position.set(cx-w/2+i, cy, cz); scene.add(s);
+    }
+  }
+}
+
+function buildEscapePod(x, y, z) {
+  const podMat = new THREE.MeshLambertMaterial({ color:0x112233 });
+  const podGlow = new THREE.MeshBasicMaterial({ color:0x00ffaa, transparent:true, opacity:0.3 });
+  // Body
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 3.5, 10), podMat);
+  body.position.set(x, y+2, z); body.castShadow=true; scene.add(body);
+  // Nose cone
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2, 10), podMat);
+  nose.position.set(x, y+5, z); nose.castShadow=true; scene.add(nose);
+  // Glow ring
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2, 0.1, 6, 20), podGlow);
+  ring.position.set(x, y+1.5, z); ring.rotation.x=Math.PI/2; scene.add(ring);
+  // Door
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, 0.1), new THREE.MeshLambertMaterial({color:0x223344}));
+  door.position.set(x, y+1.6, z+1.85); scene.add(door);
+  // Thruster
+  const thrust = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.2, 0.6, 8), new THREE.MeshLambertMaterial({color:0x0a0f18}));
+  thrust.position.set(x, y+0.2, z); scene.add(thrust);
+  // Point light on pod
+  const podLight = new THREE.PointLight(0x00ffaa, 0.8, 10);
+  podLight.position.set(x, y+3, z); scene.add(podLight);
+  pointLights.push({ light:podLight, base:0.8, flicker:false });
+}
+
+// ── LIGHTING ─────────────────────────────────────────────────────────────
+function buildLighting() {
+  // Bright base ambient so everything is clearly visible
+  ambientLight = new THREE.AmbientLight(0x8899bb, 2.5);
+  scene.add(ambientLight);
+
+  // Strong ceiling lights along the whole station
+  [[0,3.5,0],[10,3.5,0],[20,3.5,0],[36,4,4],[36,4,0],[36,4,-8],[36,4,-16],[36,4,-24],[36,4.5,-30]].forEach(([x,y,z]) => {
+    const l = new THREE.PointLight(0xffffff, 1.5, 22);
+    l.position.set(x,y,z); l.castShadow=false; scene.add(l);
+    pointLights.push({ light:l, base:1.5, flicker:false });
+  });
+
+  // Red emergency accents — decorative, not the main source
+  [[0,3.5,0],[20,3.5,0],[36,4,-16]].forEach(([x,y,z]) => {
+    const l = new THREE.PointLight(0xff2200, 0.8, 14);
+    l.position.set(x,y,z); scene.add(l);
+    pointLights.push({ light:l, base:0.8, flicker:true, emergency:true });
+  });
+
+  // Blue accent lights
+  [[13,2,0],[28,2,5],[36,2,-8],[36,2,-22],[0,2,-14]].forEach(([x,y,z]) => {
+    const l = new THREE.PointLight(0x4488ff, 0.9, 14);
+    l.position.set(x,y,z); scene.add(l);
+    pointLights.push({ light:l, base:0.9, flicker:false, blue:true });
+  });
+
+  // Pod bay green glow
+  const podAmbient = new THREE.PointLight(0x00ff88, 1.2, 28);
+  podAmbient.position.set(36, 3, -30); scene.add(podAmbient);
+}
+
+// ── COLLECTIBLES ─────────────────────────────────────────────────────────
+function spawnCollectibles() {
+  const items = [
+    // batteries scattered around
+    { type:'battery', x:-4, z:3 }, { type:'battery', x:5, z:-3 },
+    { type:'battery', x:22, z:3 }, { type:'battery', x:28, z:-5 },
+    { type:'battery', x:36, z:6 }, { type:'battery', x:40, z:-12 },
+    // medkits
+    { type:'medkit', x:8, z:2 }, { type:'medkit', x:35, z:-20 },
+    { type:'medkit', x:30, z:-28 },
+    // keycard — in hub
+    { type:'keycard', x:36, z:-5 },
+    // toolkit
+    { type:'toolkit', x:0, z:-15 }, { type:'toolkit', x:20, z:5 },
+    // gun
+    { type:'gun', x:36, z:4 },
+  ];
+
+  const colors = { battery:0x00aaff, medkit:0x00ff44, keycard:0xffdd00, toolkit:0xff8800, gun:0xff2244 };
+  const icons  = { battery:'🔋', medkit:'💊', keycard:'🔑', toolkit:'🔧', gun:'🔫' };
+
+  items.forEach(item => {
+    const geo = item.type==='keycard'
+      ? new THREE.BoxGeometry(0.3,0.05,0.5)
+      : item.type==='gun'
+      ? new THREE.BoxGeometry(0.4,0.15,0.6)
+      : new THREE.BoxGeometry(0.25,0.25,0.25);
+    const mat = new THREE.MeshLambertMaterial({ color:colors[item.type], emissive:colors[item.type], emissiveIntensity:0.3 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(item.x, 0.3, item.z); scene.add(mesh);
+
+    // Glow light
+    const gl = new THREE.PointLight(colors[item.type], 0.4, 2.5);
+    gl.position.set(item.x, 0.5, item.z); scene.add(gl);
+
+    collectibles.push({ mesh, light:gl, type:item.type, pos:new THREE.Vector3(item.x,0,item.z), collected:false });
+  });
+}
+
+// ── INTERACTABLES ─────────────────────────────────────────────────────────
+function buildInteractables() {
+  // Power console — room 1
+  const consoleMat = new THREE.MeshLambertMaterial({ color:0x112233 });
+  const screenMat  = new THREE.MeshBasicMaterial({ color:0x001122 });
+  const console1 = new THREE.Group();
+  console1.add(makeMesh(new THREE.BoxGeometry(1.5,1,0.5), consoleMat, 0,0.5,0));
+  console1.add(makeMesh(new THREE.BoxGeometry(1.2,0.7,0.05), screenMat, 0,0.9,0.28));
+  console1.position.set(-4, 0, -4); scene.add(console1);
+  interactables.push({ mesh:console1, type:'power_console', pos:new THREE.Vector3(-4,0,-4), used:false, label:'[E] RESTORE POWER (need 3x battery)' });
+
+  // Door panel — between hub and pod bay
+  const doorPanel = new THREE.Group();
+  doorPanel.add(makeMesh(new THREE.BoxGeometry(0.4,0.8,0.1), consoleMat, 0,0.4,0));
+  doorPanel.add(makeMesh(new THREE.BoxGeometry(0.25,0.4,0.05), new THREE.MeshBasicMaterial({color:0x440000}), 0,0.4,0.08));
+  doorPanel.position.set(29, 0, -9); scene.add(doorPanel);
+  interactables.push({ mesh:doorPanel, type:'door_panel', pos:new THREE.Vector3(29,0,-9), used:false, label:'[E] UNLOCK POD BAY (need keycard)' });
+
+  // Door (visible blocker between hub and pod corridor)
+  const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(8,4.5,0.3), new THREE.MeshLambertMaterial({color:0x0a1520}));
+  doorMesh.position.set(36, 2.25, -22.3); scene.add(doorMesh);
+  interactables.push({ mesh:doorMesh, type:'door_blocker', pos:new THREE.Vector3(36,2,-22.3), used:false, label:'' });
+  walls.push({ min:new THREE.Vector3(31,-1,-22.6), max:new THREE.Vector3(41,6,-22.0), isDoor:true });
+
+  // Escape pod hatch
+  const hatchGroup = new THREE.Group();
+  hatchGroup.add(makeMesh(new THREE.BoxGeometry(1.2,1.8,0.15), consoleMat, 0,0.9,0));
+  hatchGroup.position.set(36, 0, -32.1); scene.add(hatchGroup);
+  interactables.push({ mesh:hatchGroup, type:'escape_pod', pos:new THREE.Vector3(36,0,-32.1), used:false, label:'[E] LAUNCH ESCAPE POD' });
+}
+
+function makeMesh(geo, mat, x, y, z) {
+  const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); return m;
+}
+
+// ── ROBOTS ───────────────────────────────────────────────────────────────
+function spawnRobot(px, pz) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshLambertMaterial({ color:0x1a2233 });
+  const eyeMat  = new THREE.MeshBasicMaterial({ color:0xff0000 });
+  const jointMat= new THREE.MeshLambertMaterial({ color:0x0a1020 });
+
+  // Torso
+  group.add(makeMesh(new THREE.BoxGeometry(0.7,0.9,0.4), bodyMat, 0,1.15,0));
+  // Head
+  group.add(makeMesh(new THREE.BoxGeometry(0.5,0.4,0.4), bodyMat, 0,1.85,0));
+  // Eyes
+  [-0.12,0.12].forEach(ex => {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06,5,5), eyeMat);
+    eye.position.set(ex, 1.88, 0.22); group.add(eye);
+  });
+  // Antennae
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.3,4), bodyMat);
+  ant.position.set(0, 2.12, 0); group.add(ant);
+  // Arms
+  [-0.5,0.5].forEach(ax => {
+    group.add(makeMesh(new THREE.BoxGeometry(0.18,0.7,0.18), bodyMat, ax,1.05,0));
+    group.add(makeMesh(new THREE.BoxGeometry(0.22,0.22,0.22), jointMat, ax,0.65,0));
+  });
+  // Legs
+  [-0.2,0.2].forEach(lx => {
+    group.add(makeMesh(new THREE.BoxGeometry(0.2,0.65,0.2), bodyMat, lx,0.4,0));
+    group.add(makeMesh(new THREE.BoxGeometry(0.25,0.15,0.3), jointMat, lx,0.07,0.05));
+  });
+
+  // Eye glow
+  const eyeLight = new THREE.PointLight(0xff0000, 0.5, 3);
+  eyeLight.position.set(0, 1.88, 0.3); group.add(eyeLight);
+
+  group.position.set(px, 0, pz);
+  scene.add(group);
+
+  robots.push({
+    mesh:group, hp:40,
+    pos:new THREE.Vector3(px,0,pz),
+    speed:2.2 + Math.random()*0.8,
+    state:'patrol',
+    attackTimer:0, legAnim:0,
+    patrolAngle:Math.random()*Math.PI*2
+  });
+}
+
+// ── GAME FLOW ─────────────────────────────────────────────────────────────
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  gameActive = true;
+  showMsg('MIRA: "Welcome back, Dr. Chen. You cannot leave."', 5);
+  robotSpawnTimer = 20;
+  // Spawn initial robots
+  spawnRobot(18, 3); spawnRobot(22, -3); spawnRobot(36, 7);
+  animate();
+  setTimeout(() => document.getElementById('c').requestPointerLock(), 200);
+}
+
+function showMsg(text, dur=3) {
+  const el = document.getElementById('message');
+  el.textContent = text;
+  el.style.opacity = '1';
+  msgTimer = dur;
+}
+
+function selectSlot(i) {
+  document.getElementById('slot-'+selectedSlot).classList.remove('active');
+  selectedSlot = i;
+  document.getElementById('slot-'+i).classList.add('active');
+}
+
+function interact() {
+  const cp = camera.position;
+
+  for (const ia of interactables) {
+    if (ia.pos.distanceTo(cp) > 4) continue;
+
+    if (ia.type === 'power_console' && !ia.used) {
+      if (inv.battery >= 3) {
+        inv.battery -= 3;
+        ia.used = true;
+        obj.power = true;
+        player.power = 100;
+        // Dramatically light up the station
+        pointLights.forEach(pl => {
+          pl.light.intensity = pl.base * (pl.emergency ? 1.8 : 2.2);
+        });
+        ambientLight.color.setHex(0x334466);
+        ambientLight.intensity = 4.0;
+        showMsg('POWER RESTORED. Unlock the pod bay door.', 4);
+        updateObjectives();
+        updateHotbar();
+        // Change console screen to green
+        ia.mesh.children[1].material.color.setHex(0x002200);
+        ia.mesh.children[1].material.emissive = new THREE.Color(0x004400);
+      } else {
+        showMsg(`Need 3 batteries. Have: ${inv.battery}`, 3);
+      }
+      return;
+    }
+
+    if (ia.type === 'door_panel' && !ia.used) {
+      if (!obj.power) { showMsg('No power. Restore power first.', 3); return; }
+      if (inv.keycard >= 1) {
+        inv.keycard--;
+        ia.used = true;
+        obj.door = true;
+        // Remove door blocker
+        const blocker = interactables.find(x => x.type === 'door_blocker');
+        if (blocker) {
+          scene.remove(blocker.mesh);
+          // Remove door wall
+          const di = walls.findIndex(w => w.isDoor);
+          if (di !== -1) walls.splice(di, 1);
+        }
+        showMsg('POD BAY UNLOCKED. Get to the escape pod!', 4);
+        updateObjectives();
+        updateHotbar();
+        ia.mesh.children[1].material.color.setHex(0x002200);
+      } else {
+        showMsg('Need keycard. Search the hub.', 3);
+      }
+      return;
+    }
+
+    if (ia.type === 'escape_pod') {
+      if (!obj.door) { showMsg('Pod bay is locked. Find the keycard.', 3); return; }
+      if (!obj.power) { showMsg('No power for launch sequence.', 3); return; }
+      winGame();
+      return;
+    }
+  }
+
+  // Collectibles
+  for (const c of collectibles) {
+    if (c.collected || c.pos.distanceTo(cp) > 3) continue;
+    c.collected = true;
+    c.mesh.visible = false;
+    c.light.intensity = 0;
+    inv[c.type]++;
+    const names = { battery:'battery', medkit:'medkit', keycard:'KEYCARD', toolkit:'toolkit', gun:'sidearm' };
+    showMsg(`Picked up: ${names[c.type]} (${inv[c.type]} total)`, 2);
+    updateHotbar();
+    return;
+  }
+
+  showMsg('Nothing to interact with here.', 2);
+}
+
+function useItem() {
+  if (inv.medkit > 0) {
+    inv.medkit--;
+    player.hp = Math.min(100, player.hp + 40);
+    showMsg('Medkit used. (+40 HP)', 2);
+    updateHotbar();
+  } else if (inv.toolkit > 0 && player.oxygen < 80) {
+    inv.toolkit--;
+    player.oxygen = Math.min(100, player.oxygen + 50);
+    showMsg('Patched suit. (+50 O₂)', 2);
+    updateHotbar();
+  } else {
+    showMsg('F: use medkit (heal) or toolkit (repair suit O₂)', 2);
+  }
+}
+
+function updateObjectives() {
+  if (obj.power) {
+    document.getElementById('obj-power').className = 'obj-done';
+    document.getElementById('obj-door').className = 'obj-active';
+  }
+  if (obj.door) {
+    document.getElementById('obj-door').className = 'obj-done';
+    document.getElementById('obj-escape').className = 'obj-active';
+  }
+}
+
+function updateHotbar() {
+  const vals = [inv.battery, inv.medkit, inv.keycard, inv.toolkit, inv.gun];
+  vals.forEach((v,i) => document.getElementById('cnt-'+i).textContent = v);
+}
+
+function die(reason) {
+  gameActive = false;
+  document.exitPointerLock();
+  const go = document.getElementById('gameover');
+  go.style.display = 'flex';
+  document.getElementById('death-reason').textContent = reason;
+  const elapsed = Math.floor(gameTime);
+  document.getElementById('survived-time').textContent = `Survived ${Math.floor(elapsed/60)}m ${elapsed%60}s`;
+}
+
+function winGame() {
+  gameActive = false;
+  document.exitPointerLock();
+  const ws = document.getElementById('winscreen');
+  ws.style.display = 'flex';
+  const rem = Math.max(0, Math.floor(lockdownTime - gameTime));
+  document.getElementById('time-left-win').textContent = `${Math.floor(rem/60)}m ${rem%60}s`;
+}
+
+// ── ANIMATE ───────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  if (!gameActive) return;
+  const dt = Math.min(clock.getDelta(), 0.05);
+  gameTime += dt;
+
+  movePlayer(dt);
+  updateStats(dt);
+  updateRobots(dt);
+  updateLights(dt);
+  updateCollectibles(dt);
+  updateNearbyPrompt();
+  updateHUD();
+
+  // Lockdown timer
+  const remaining = Math.max(0, lockdownTime - gameTime);
+  const m = Math.floor(remaining/60);
+  const s = Math.floor(remaining%60);
+  document.getElementById('lockdown-timer').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+  if (remaining <= 60 && Math.floor(remaining) % 15 === 0 && Math.floor(remaining) !== Math.floor(remaining-dt))
+    showMsg(`MIRA: "${Math.floor(remaining)} seconds to full lockdown."`, 3);
+  if (remaining <= 0) die('MIRA has sealed all sectors. Lockdown complete.');
+
+  // Robot spawn
+  robotSpawnTimer -= dt;
+  if (robotSpawnTimer <= 0) {
+    const angle = Math.random()*Math.PI*2;
+    const spawnPoints = [[18,3],[22,-3],[36,7],[36,-8],[0,-14]];
+    const sp = spawnPoints[Math.floor(Math.random()*spawnPoints.length)];
+    spawnRobot(sp[0]+(Math.random()-0.5)*4, sp[1]+(Math.random()-0.5)*4);
+    robotSpawnTimer = Math.max(15, 40 - gameTime/20);
+  }
+
+  // Damage flash
+  if (damageFlashTimer > 0) {
+    damageFlashTimer -= dt;
+    document.getElementById('damage-flash').style.background = `rgba(255,0,0,${Math.max(0,damageFlashTimer*0.6)})`;
+  }
+  if (oxyFlashTimer > 0) {
+    oxyFlashTimer -= dt;
+    document.getElementById('oxy-flash').style.background = `rgba(0,50,180,${Math.max(0,oxyFlashTimer*0.4)})`;
+  }
+
+  // Message fade
+  if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) document.getElementById('message').style.opacity='0'; }
+
+  renderer.render(scene, camera);
+}
+
+function movePlayer(dt) {
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+
+  const speed = keys['ShiftLeft'] ? 6 : 4;
+  const dir = new THREE.Vector3();
+  if (keys['KeyW']||keys['ArrowUp'])    dir.z -= 1;
+  if (keys['KeyS']||keys['ArrowDown'])  dir.z += 1;
+  if (keys['KeyA']||keys['ArrowLeft'])  dir.x -= 1;
+  if (keys['KeyD']||keys['ArrowRight']) dir.x += 1;
+  dir.normalize().applyEuler(new THREE.Euler(0,yaw,0));
+
+  const np = camera.position.clone().addScaledVector(dir, speed*dt);
+
+  // Wall collision
+  const r = 0.4;
+  let bx=false, bz=false;
+  for (const w of walls) {
+    const tx = np.x, tz = camera.position.z;
+    if (tx+r>w.min.x && tx-r<w.max.x && tz+r>w.min.z && tz-r<w.max.z && camera.position.y<w.max.y) bx=true;
+    const tx2 = camera.position.x, tz2 = np.z;
+    if (tx2+r>w.min.x && tx2-r<w.max.x && tz2+r>w.min.z && tz2-r<w.max.z && camera.position.y<w.max.y) bz=true;
+  }
+  if (!bx) camera.position.x = np.x;
+  if (!bz) camera.position.z = np.z;
+
+  // Clamp
+  camera.position.x = Math.max(-7, Math.min(44, camera.position.x));
+  camera.position.z = Math.max(-37, Math.min(8, camera.position.z));
+
+  // Jump
+  if (keys['Space'] && onGround) { velocityY=6; onGround=false; }
+  velocityY -= 18*dt;
+  camera.position.y += velocityY*dt;
+  if (camera.position.y <= 1.7) { camera.position.y=1.7; velocityY=0; onGround=true; }
+}
+
+function updateStats(dt) {
+  // Oxygen slowly drains (suit damage)
+  player.oxygen = Math.max(0, player.oxygen - dt*1.2);
+  if (player.oxygen <= 0) {
+    player.hp -= 8*dt;
+    oxyFlashTimer = 0.3;
+    if (Math.random()<0.02) showMsg('SUIT BREACH — use toolkit to patch!', 2);
+  }
+  if (player.hp <= 0) die('Hull breach. Oxygen depleted.');
+}
+
+function updateRobots(dt) {
+  const cp = camera.position;
+  for (let i=robots.length-1; i>=0; i--) {
+    const rb = robots[i];
+    const toP = new THREE.Vector3(cp.x-rb.pos.x, 0, cp.z-rb.pos.z);
+    const dist = toP.length();
+
+    // State
+    if (dist < 20) rb.state = 'chase';
+    else rb.state = 'patrol';
+
+    rb.legAnim += dt*(rb.state==='chase'?5:2);
+
+    if (rb.state === 'chase') {
+      rb.pos.addScaledVector(toP.normalize(), rb.speed*dt);
+      rb.mesh.position.set(rb.pos.x,0,rb.pos.z);
+      rb.mesh.lookAt(cp.x,0,cp.z);
+      // Attack
+      if (dist < 1.6) {
+        rb.attackTimer -= dt;
+        if (rb.attackTimer <= 0) {
+          player.hp -= 15;
+          damageFlashTimer = 0.3;
+          rb.attackTimer = 1.2;
+          showMsg('MIRA: "Resistance is futile."', 2);
+        }
+      }
+    } else {
+      rb.patrolAngle += dt*0.5;
+      rb.pos.x += Math.sin(rb.patrolAngle)*0.8*dt;
+      rb.pos.z += Math.cos(rb.patrolAngle)*0.8*dt;
+      rb.mesh.position.set(rb.pos.x,0,rb.pos.z);
+    }
+
+    // Leg anim
+    rb.mesh.children.forEach((c,idx) => {
+      if (c.geometry instanceof THREE.BoxGeometry && c.position.y < 0.5 && c.position.y > 0.05) {
+        c.position.y = 0.35+Math.sin(rb.legAnim+idx)*0.08;
+      }
+    });
+
+    // Gun shot (if player has gun, handle later)
+    if (dist>80) { scene.remove(rb.mesh); robots.splice(i,1); }
+  }
+}
+
+function updateLights(dt) {
+  const t = Date.now()*0.001;
+  pointLights.forEach(pl => {
+    if (pl.flicker && pl.light.intensity > 0) {
+      pl.light.intensity = pl.base*(0.7+Math.sin(t*7+Math.random()*0.5)*0.3+Math.random()*0.1);
+    }
+  });
+  // Collectible bob
+  collectibles.forEach((c,i) => {
+    if (!c.collected) c.mesh.position.y = 0.3+Math.sin(t*2+i)*0.06;
+  });
+}
+
+function updateCollectibles(dt) {
+  // Just handled in updateLights bob
+}
+
+function updateNearbyPrompt() {
+  const cp = camera.position;
+  const el = document.getElementById('interact-prompt');
+  let label = '';
+
+  for (const c of collectibles) {
+    if (!c.collected && c.pos.distanceTo(cp)<3) {
+      const names={battery:'BATTERY',medkit:'MEDKIT',keycard:'KEYCARD',toolkit:'TOOLKIT',gun:'SIDEARM'};
+      label=`[E] PICK UP ${names[c.type]}`; break;
+    }
+  }
+  if (!label) {
+    for (const ia of interactables) {
+      if (ia.label && ia.pos.distanceTo(cp)<4 && !ia.used && ia.type!=='door_blocker') {
+        label = ia.label; break;
+      }
+      if (ia.type==='escape_pod' && ia.pos.distanceTo(cp)<4 && obj.door) {
+        label='[E] LAUNCH ESCAPE POD'; break;
+      }
+    }
+  }
+
+  el.textContent = label;
+  el.style.opacity = label ? '1' : '0';
+}
+
+function updateHUD() {
+  document.getElementById('hp-fill').style.width  = Math.max(0,player.hp)+'%';
+  document.getElementById('oxy-fill').style.width = Math.max(0,player.oxygen)+'%';
+  document.getElementById('pwr-fill').style.width = player.power+'%';
+
+  const loc = camera.position;
+  let sector = 'POWER ROOM';
+  if (loc.x > 28 && loc.z > -10) sector = 'CENTRAL HUB';
+  else if (loc.x > 28 && loc.z < -20) sector = 'POD BAY';
+  else if (loc.x > 15 && loc.z > -5) sector = 'EAST CORRIDOR';
+  else if (loc.z < -10) sector = 'SOUTH PASSAGE';
+  document.getElementById('location-label').textContent = 'SECTOR: '+sector;
+
+  // Red flash on low hp
+  if (player.hp < 25) {
+    const pulse = 0.08+Math.sin(Date.now()*0.006)*0.05;
+    document.getElementById('damage-flash').style.background = `rgba(180,0,0,${pulse})`;
+  }
+  // Blue flash on low oxy
+  if (player.oxygen < 20) {
+    const pulse = 0.07+Math.sin(Date.now()*0.008)*0.04;
+    document.getElementById('oxy-flash').style.background = `rgba(0,40,160,${pulse})`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
