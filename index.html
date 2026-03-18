@@ -390,46 +390,6 @@ function buildStation() {
       g.position.set(36+x, 0.04, z); scene.add(g);
     }
   }
-  // ── COLLISION WALLS — only outer perimeter, openings left where corridors connect ──
-  // Room 1 outer walls (z sides)
-  walls.push({ min:new THREE.Vector3(-8,-1,-5.3), max:new THREE.Vector3(8,6,-4.7) });   // back wall
-  walls.push({ min:new THREE.Vector3(-8,-1, 4.7), max:new THREE.Vector3(8,6, 5.3) });   // front wall
-  // Room 1 left wall (west)
-  walls.push({ min:new THREE.Vector3(-8,-1,-5), max:new THREE.Vector3(-6.7,6,5) });
-  // Room 1 right wall — gap at z=0±2 for tunnel passage
-  walls.push({ min:new THREE.Vector3(6.7,-1,-5), max:new THREE.Vector3(8,6,-2.5) });
-  walls.push({ min:new THREE.Vector3(6.7,-1, 2.5), max:new THREE.Vector3(8,6, 5) });
-
-  // Room 2 (hub) outer walls — gaps on west side (from tunnel) and north (corridor to pod)
-  walls.push({ min:new THREE.Vector3(26.7,-1,-9), max:new THREE.Vector3(28,6, 9) });    // west — gap at z=0±2
-  walls.push({ min:new THREE.Vector3(26.7,-1,-9), max:new THREE.Vector3(45,-1,-8.7) }); // just floor markers
-  walls.push({ min:new THREE.Vector3(44.7,-1,-9), max:new THREE.Vector3(45.3,6, 9) });  // east wall
-  walls.push({ min:new THREE.Vector3(28,-1, 8.7), max:new THREE.Vector3(45,6, 9.3) });  // south wall
-  walls.push({ min:new THREE.Vector3(28,-1,-9.3), max:new THREE.Vector3(45,6,-8.7) });  // north wall (gap at x=36±2)
-  walls.push({ min:new THREE.Vector3(28,-1,-9.3), max:new THREE.Vector3(33,6,-8.7) });
-  walls.push({ min:new THREE.Vector3(39,-1,-9.3), max:new THREE.Vector3(45,6,-8.7) });
-
-  // Corridor room1→hub: west gap already open, east opens into hub west wall gap
-  walls.push({ min:new THREE.Vector3(9,-1,-2.8), max:new THREE.Vector3(10,6,-2.2) });   // tunnel south
-  walls.push({ min:new THREE.Vector3(9,-1, 2.2), max:new THREE.Vector3(10,6, 2.8) });   // tunnel north
-
-  // Hub→pod corridor (x=36, z=-9 to -22)
-  walls.push({ min:new THREE.Vector3(31.7,-1,-22), max:new THREE.Vector3(32.3,6,-9) });  // west side
-  walls.push({ min:new THREE.Vector3(39.7,-1,-22), max:new THREE.Vector3(40.3,6,-9) });  // east side
-
-  // Pod bay outer walls — gap on south for corridor
-  walls.push({ min:new THREE.Vector3(27.7,-1,-37), max:new THREE.Vector3(28.3,6,-22) }); // west
-  walls.push({ min:new THREE.Vector3(43.7,-1,-37), max:new THREE.Vector3(44.3,6,-22) }); // east
-  walls.push({ min:new THREE.Vector3(28,-1,-37.3), max:new THREE.Vector3(44,6,-36.7) }); // far north wall
-
-  // Central pillar (hub)
-  walls.push({ min:new THREE.Vector3(34.5,-1,-1.5), max:new THREE.Vector3(37.5,5,1.5) });
-
-  // South passage (room1 south)
-  walls.push({ min:new THREE.Vector3(-4.3,-1,-20), max:new THREE.Vector3(-3.7,6,-4.7) });
-  walls.push({ min:new THREE.Vector3( 3.7,-1,-20), max:new THREE.Vector3( 4.3,6,-4.7) });
-  walls.push({ min:new THREE.Vector3(-4,-1,-20.3), max:new THREE.Vector3( 4,6,-19.7) });
-
   // Corridor north from hub
   makeRoom(36, 0, -16, 8, 4, 12, metalDark, hull);
 
@@ -464,11 +424,10 @@ function buildStation() {
   const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 4.5, 8), metalMid);
   pillar.position.set(36, 2.25, 0); pillar.castShadow = true; scene.add(pillar);
 
-  // Crates / cover (visual + small collision)
+  // Crates / cover (visual only)
   [[8,0.4,2],[8,0.4,-2],[28,0.4,5],[-5,0.4,-14],[36,0.4,-22],[30,0.4,-28],[42,0.4,-28]].forEach(([x,y,z]) => {
     const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.8,1.2), new THREE.MeshLambertMaterial({color:0x1a2a1a}));
     crate.position.set(x,y,z); crate.castShadow=true; scene.add(crate);
-    walls.push({ min:new THREE.Vector3(x-0.7,-1,z-0.7), max:new THREE.Vector3(x+0.7,2,z+0.7) });
   });
 
   // Windows (broken hull view to space)
@@ -915,23 +874,30 @@ function movePlayer(dt) {
   if (keys['KeyD']||keys['ArrowRight']) dir.x += 1;
   dir.normalize().applyEuler(new THREE.Euler(0,yaw,0));
 
-  const np = camera.position.clone().addScaledVector(dir, speed*dt);
+  camera.position.x += dir.x * speed * dt;
+  camera.position.z += dir.z * speed * dt;
 
-  // Wall collision
-  const r = 0.4;
-  let bx=false, bz=false;
-  for (const w of walls) {
-    const tx = np.x, tz = camera.position.z;
-    if (tx+r>w.min.x && tx-r<w.max.x && tz+r>w.min.z && tz-r<w.max.z && camera.position.y<w.max.y) bx=true;
-    const tx2 = camera.position.x, tz2 = np.z;
-    if (tx2+r>w.min.x && tx2-r<w.max.x && tz2+r>w.min.z && tz2-r<w.max.z && camera.position.y<w.max.y) bz=true;
+  // Only the door blocker matters — check it if active
+  const doorWall = walls.find(w => w.isDoor);
+  if (doorWall) {
+    const r = 0.4;
+    const p = camera.position;
+    if (p.x+r > doorWall.min.x && p.x-r < doorWall.max.x &&
+        p.z+r > doorWall.min.z && p.z-r < doorWall.max.z) {
+      // Push player out whichever axis has least overlap
+      const overlapZ = Math.min(Math.abs(p.z - doorWall.min.z), Math.abs(p.z - doorWall.max.z));
+      const overlapX = Math.min(Math.abs(p.x - doorWall.min.x), Math.abs(p.x - doorWall.max.x));
+      if (overlapZ < overlapX) {
+        p.z = p.z < (doorWall.min.z+doorWall.max.z)/2 ? doorWall.min.z - r : doorWall.max.z + r;
+      } else {
+        p.x = p.x < (doorWall.min.x+doorWall.max.x)/2 ? doorWall.min.x - r : doorWall.max.x + r;
+      }
+    }
   }
-  if (!bx) camera.position.x = np.x;
-  if (!bz) camera.position.z = np.z;
 
-  // Clamp
-  camera.position.x = Math.max(-7, Math.min(44, camera.position.x));
-  camera.position.z = Math.max(-37, Math.min(8, camera.position.z));
+  // Clamp to station bounds
+  camera.position.x = Math.max(-8, Math.min(46, camera.position.x));
+  camera.position.z = Math.max(-38, Math.min(8, camera.position.z));
 
   // Jump
   if (keys['Space'] && onGround) { velocityY=6; onGround=false; }
